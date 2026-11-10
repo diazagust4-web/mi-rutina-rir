@@ -27,7 +27,12 @@ function validateEntry(e) {
     integer(e.week,1,8) && integer(e.day,1,5) && integer(e.set,1,100) &&
     integer(e.reps,1,999) && integer(e.rir,0,99) && (e.kg===null || Number.isFinite(e.kg) && e.kg>=0 && e.kg<=2000) &&
     Number.isSafeInteger(e.created) && e.created>=0);
-  return Object.fromEntries(['id','created',...fields].map(k=>[k,e[k]]));
+  const entry=Object.fromEntries(['id','created',...fields].map(k=>[k,e[k]]));
+  if(e.updated!==undefined){
+    ensure(Number.isSafeInteger(e.updated) && e.updated>e.created && /^[a-f0-9-]{36}$/i.test(e.editId));
+    entry.updated=e.updated;entry.editId=e.editId;
+  }
+  return entry;
 }
 function backup() {
   const entries=Object.keys(localStorage).filter(k=>k.startsWith(ns+'set.')).sort()
@@ -41,16 +46,22 @@ function parseBackup(b) {
 function merge(b) {
   const existing=backup();
   if (b.plan && existing.plan) ensure(JSON.stringify(existing.plan)===JSON.stringify(b.plan),'Las plantillas difieren. Se conservó la copia existente.');
-  const seen=new Map(existing.entries.map(e=>[e.id,JSON.stringify(e)]));
+  const seen=new Map(existing.entries.map(e=>[e.id,e]));
   for(const e of b.entries){
-    const json=JSON.stringify(e);
-    ensure(!seen.has(e.id)||seen.get(e.id)===json,'Hay dos versiones de la misma serie. Conservá ambas copias para revisarlas.');
-    seen.set(e.id,json);
+    const prior=seen.get(e.id);
+    if(prior){
+      ensure(['created','date','week','day','exercise','set'].every(k=>prior[k]===e[k]),'Dos series distintas tienen el mismo identificador.');
+      const order=(e.updated??0)-(prior.updated??0) || (e.editId??'').localeCompare(prior.editId??'');
+      if(order===0) ensure(JSON.stringify(e)===JSON.stringify(prior),'Hay dos versiones incompatibles de la misma serie.');
+      if(order<=0)continue;
+    }
+    seen.set(e.id,e);
   }
   if(b.plan && !existing.plan) localStorage.setItem(ns+'plan',JSON.stringify(b.plan));
-  for(const e of b.entries) {
+  for(const e of seen.values()) {
     const key=ns+'set.'+e.id;
-    if(localStorage.getItem(key)===null) localStorage.setItem(key,JSON.stringify(e));
+    const value=JSON.stringify(e);
+    if(localStorage.getItem(key)!==value) localStorage.setItem(key,value);
   }
 }
 function formValues(){ return Object.fromEntries(fields.map(k=>[k,$(k).value])); }
@@ -88,7 +99,7 @@ function renderSession(exercises){
     for(let set=1;set<=count;set++){
       const saved=matching.find(e=>e.week===week && e.date===date && e.set===set);
       const previous=matching.find(e=>e.week===week-1 && e.set===set);
-      const signature=JSON.stringify([saved?.id,previous?.id]);
+      const signature=JSON.stringify([saved?.id,saved?.editId,previous?.id,previous?.editId]);
       const old=card.querySelector('[data-set="'+set+'"]');
       if(old?.dataset.signature===signature) continue;
       const form=element('form',undefined,'setrow');
@@ -106,7 +117,7 @@ function renderSession(exercises){
         input.value=values[name]??'';inputs[name]=input;form.append(input);
       }
       if(previous) form.append(element('small','Semana anterior · '+(previous.kg===null?'Sin carga':previous.kg+' kg')+' · '+previous.reps+' reps · RIR '+previous.rir));
-      if(saved) form.append(element('span','✓ Guardada','saved'));
+      if(saved) form.append(element('span','✓ Guardada','saved'),editButton(saved));
       else{
         form.append(element('button','Guardar serie '+set));
         form.oninput=localAction(()=>localStorage.setItem(draftKey,JSON.stringify(Object.fromEntries(new FormData(form)))));
@@ -146,13 +157,40 @@ function render(){
   $('history').replaceChildren(...rows.map(e=>{
     const li=document.createElement('li'), small=document.createElement('small');
     li.textContent=e.exercise+' · Serie '+e.set;
-    small.textContent=stats(e);li.append(small);return li;
+    small.textContent=stats(e);li.append(small,editButton(e));return li;
   }));
   if(!rows.length) $('history').textContent='Todavía no registraste series para esta fecha, semana y día.';
 }
 function localAction(fn){
   return async event=>{try{alertUser('');await fn(event);}catch(e){alertUser(e.message || 'No se pudo guardar. Revisá el espacio del navegador.');}};
 }
+let editing;
+function editButton(entry){
+  const button=element('button','Editar serie');
+  button.type='button';
+  button.onclick=()=>{
+    editing=entry;
+    $('edit-title').textContent=entry.exercise+' · Serie '+entry.set;
+    for(const k of ['kg','reps','rir']) $('edit-'+k).value=entry[k]??'';
+    $('edit-error').textContent='';
+    $('editor').showModal();
+  };
+  return button;
+}
+$('edit-cancel').onclick=()=>$('editor').close();
+$('edit-form').onsubmit=event=>{
+  event.preventDefault();
+  try{
+    const key=ns+'set.'+editing.id;
+    const current=validateEntry(JSON.parse(localStorage.getItem(key)));
+    ensure(JSON.stringify(current)===JSON.stringify(editing),'Esta serie cambió en otra sesión. Tocá Cancelar y volvé a abrirla para revisar los valores.');
+    const kg=$('edit-kg').value;
+    const edited=validateEntry({...current,kg:kg===''?null:+kg,reps:+$('edit-reps').value,rir:+$('edit-rir').value,
+      updated:Math.max(Date.now(),(current.updated??current.created)+1),editId:crypto.randomUUID()});
+    localStorage.setItem(key,JSON.stringify(edited));
+    $('editor').close();renderPlan();$('local').textContent='Corrección guardada en este dispositivo.';schedule();
+  }catch(e){$('edit-error').textContent=e.message;}
+};
 function init(){
   options($('week'),Array.from({length:8},(_,i)=>['Semana '+(i+1),i+1]));
   const today=new Date();
