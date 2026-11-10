@@ -2,14 +2,22 @@
 <html lang="es-AR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#193d38"><title>Mi Rutina RIR</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#f3f3ec;color:#193d38;font:16px/1.45 "DM Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}header{background:#193d38;color:white;padding:26px max(5vw,calc((100vw - 720px)/2));border-bottom:5px solid #bfe39a}h1{font-size:clamp(2.4rem,8vw,4rem);line-height:1;margin:0;letter-spacing:-.055em}header span{color:#cbe8a9}main{max-width:760px;margin:auto;padding:18px 14px 55px}section,details{background:#fff;border:1px solid #d7ded4;border-radius:16px;padding:clamp(16px,4vw,26px);margin-bottom:14px}h2{margin:0 0 16px;font-size:1.35rem}label{display:block;font-weight:600;font-size:.88rem}input,select,button,.button{display:block;width:100%;font:inherit;font-size:16px;min-height:46px;border-radius:9px;padding:.55rem .7rem}input,select{margin:5px 0 12px;border:1px solid #9fafa6;background:white;color:#183630;min-width:0}button,.button{cursor:pointer;border:0;background:#e8eee5;color:#183f35;font-weight:650;text-align:center}.primary{background:#245b4d;color:white}.row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.three{grid-template-columns:repeat(3,minmax(0,1fr))}.note{white-space:pre-line;color:#456553}.note:empty{display:none}summary{cursor:pointer;font-weight:bold;font-size:1.1rem}details p{margin:.85rem 0}li{padding:.7rem 0;border-top:1px solid #dce3da;overflow-wrap:anywhere}ul{list-style:none;padding:0;margin-bottom:0}li small{display:block;color:#486150}button:focus-visible,summary:focus-visible{outline:3px solid #3e805c}#local{font-size:.86rem;margin:.6rem 0 0}button:disabled{opacity:.5}input[type=file]{font-size:.85rem}#alerts{color:#8b301e;font-weight:600}#alerts:empty{display:none}
-</style><script defer src="app.js"></script></head>
+
+.exercise h3{margin:0;font-size:1.22rem}.exercise .note{margin:.35rem 0 1rem;font-size:.92rem}.setrow,.columns{display:grid;grid-template-columns:2.3em repeat(3,minmax(0,1fr));align-items:center;gap:8px}
+.columns{font-size:.8rem;color:#476256;font-weight:650}.setrow{padding:8px 0;border-top:1px solid #dde3da}.setrow input{margin:0;padding:.4rem;text-align:center}
+.setrow button,.setrow .saved{grid-column:2/-1;min-height:40px}.saved{color:#245b4d;text-align:right;font-size:.85rem;align-content:center}
+.setrow small{grid-column:1/-1;color:#486150}.setrow input:disabled{color:#193d38;-webkit-text-fill-color:#193d38;opacity:1;background:#f2f5ef}
+#manual summary{margin-bottom:10px}
+</style><script defer src="app.js?v=2"></script></head>
 <body><header><h1>Mi Rutina <span>RIR</span></h1></header><main><p id="alerts" role="alert"></p>
-<section><h2>Registrar serie</h2><form id="entry"><label>Fecha<input id="date" type="date" required></label>
+<section><h2>Rutina del día</h2><label>Fecha<input id="date" type="date" required></label>
 <div class="row"><label>Semana<select id="week"></select></label><label>Día<select id="day"></select></label></div>
-<label id="planned" hidden>Ejercicio de la plantilla<select id="choices"></select></label><label>Ejercicio<input id="exercise" required maxlength="120" placeholder="Nombre del ejercicio" autocomplete="off"></label>
+<p id="local" role="status"></p><p id="cloud" role="status">Drive desconectado.</p></section>
+<div id="session"></div>
+<details id="manual"><summary>Registrar una serie adicional</summary><form id="entry"><label>Ejercicio<input id="exercise" required maxlength="120" placeholder="Nombre del ejercicio" autocomplete="off"></label>
 <p class="note" id="target"></p><label>Serie<input id="set" type="number" min="1" max="100" value="1" required></label>
 <div class="row three"><label>Kilos<input id="kg" type="number" inputmode="decimal" min="0" max="2000" step="any" placeholder="Opcional"></label><label>Reps<input id="reps" type="number" inputmode="numeric" min="1" max="999" required></label><label>RIR real<input id="rir" type="number" inputmode="numeric" min="0" max="99" required></label></div>
-<p id="previous" class="note"></p><button class="primary">Guardar serie</button><p id="local" role="status"></p></form><p id="cloud" role="status">Drive desconectado.</p></section>
+<p id="previous" class="note"></p><button class="primary">Guardar serie</button></form></details>
 <section><h2>Series del día seleccionado</h2><ul id="history"></ul></section>
 <details id="settings"><summary>Copias y Google Drive</summary><p>Conectá tu cuenta para sincronizar las series mientras la app está abierta.</p>
 <label>Client ID de Google<input id="client" placeholder="…apps.googleusercontent.com" autocapitalize="none" spellcheck="false"></label><button id="connect">Conectar Google Drive</button><div class="row"><button id="sync" disabled>Sincronizar</button><button id="off" disabled>Desconectar</button></div><hr>

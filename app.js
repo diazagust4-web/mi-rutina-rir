@@ -58,14 +58,79 @@ function draft(){ localStorage.setItem(ns+'draft',JSON.stringify(formValues()));
 function options(select,labels) {
   select.replaceChildren(...labels.map(([label,value])=>new Option(label,value)));
 }
+function element(tag, text, className){
+  const node=document.createElement(tag);
+  if(text!==undefined) node.textContent=text;
+  if(className) node.className=className;
+  return node;
+}
+function renderSession(exercises){
+  const session=$('session');
+  const date=$('date').value, week=+$('week').value, day=+$('day').value;
+  const context=JSON.stringify([date,week,day,exercises]);
+  const rebuild=session.dataset.context!==context;
+  if(rebuild){
+    session.replaceChildren();
+    session.dataset.context=context;
+  }
+  const entries=backup().entries.sort((a,b)=>b.created-a.created);
+  for(const [i,ex] of exercises.entries()){
+    const [exercise,count,reps,tempo,rir,rest]=ex;
+    let card=session.children[i];
+    if(rebuild){
+      card=element('section',undefined,'exercise');
+      card.append(element('h3',exercise),element('p',count+' series · '+reps+' reps\nRIR objetivo '+rir+' · Descanso '+rest+(tempo?'\n'+tempo:''),'note'));
+      const columns=element('div',undefined,'columns');
+      for(const label of ['Serie','Kilos','Reps','RIR']) columns.append(element('span',label));
+      card.append(columns);session.append(card);
+    }
+    const matching=entries.filter(e=>e.day===day && e.exercise.trim().toLocaleLowerCase()===exercise.trim().toLocaleLowerCase());
+    for(let set=1;set<=count;set++){
+      const saved=matching.find(e=>e.week===week && e.date===date && e.set===set);
+      const previous=matching.find(e=>e.week===week-1 && e.set===set);
+      const signature=JSON.stringify([saved?.id,previous?.id]);
+      const old=card.querySelector('[data-set="'+set+'"]');
+      if(old?.dataset.signature===signature) continue;
+      const form=element('form',undefined,'setrow');
+      form.dataset.set=set;form.dataset.signature=signature;
+      const draftKey=ns+'row.'+JSON.stringify([date,week,day,exercise,set]);
+      const values=saved || JSON.parse(localStorage.getItem(draftKey)) || {};
+      form.append(element('strong',String(set)));
+      const inputs={};
+      for(const [name,label,max] of [['kg','Kilos',2000],['reps','Repeticiones',999],['rir','RIR real',99]]){
+        const input=element('input');
+        input.type='number';input.name=name;input.inputMode=name==='kg'?'decimal':'numeric';
+        input.min=name==='reps'?1:0;input.max=max;input.step=name==='kg'?'any':'1';
+        input.required=name!=='kg';input.disabled=!!saved;input.placeholder='—';
+        input.setAttribute('aria-label',exercise+', serie '+set+', '+label);
+        input.value=values[name]??'';inputs[name]=input;form.append(input);
+      }
+      if(previous) form.append(element('small','Semana anterior · '+(previous.kg===null?'Sin carga':previous.kg+' kg')+' · '+previous.reps+' reps · RIR '+previous.rir));
+      if(saved) form.append(element('span','✓ Guardada','saved'));
+      else{
+        form.append(element('button','Guardar serie '+set));
+        form.oninput=localAction(()=>localStorage.setItem(draftKey,JSON.stringify(Object.fromEntries(new FormData(form)))));
+        form.onsubmit=localAction(event=>{
+          event.preventDefault();
+          ensure(date,'Elegí una fecha antes de guardar.');
+          const entry=validateEntry({date,week,day,exercise,set,id:crypto.randomUUID(),created:Date.now(),
+            kg:inputs.kg.value===''?null:+inputs.kg.value,reps:+inputs.reps.value,rir:+inputs.rir.value});
+          localStorage.setItem(ns+'set.'+entry.id,JSON.stringify(entry));
+          localStorage.removeItem(draftKey);renderPlan();schedule();
+        });
+      }
+      if(old)old.replaceWith(form);else card.append(form);
+    }
+  }
+}
 function renderPlan(){
   plan=backup().plan;
   const day=$('day').value || '1';
   options($('day'),(plan?.days || names).map((n,i)=>[n,i+1]));
   $('day').value=day;
   const exercises=plan?.weeks[+$('week').value-1]?.[+day-1] || [];
-  $('planned').hidden=!exercises.length;
-  options($('choices'),[['Elegí un ejercicio',''],...exercises.map(x=>[x[0],x[0]])]);
+  renderSession(exercises);
+  if(!exercises.length) $('manual').open=true;
   render();
 }
 function render(){
@@ -75,7 +140,7 @@ function render(){
   const stats=e=>(e.kg===null?'Sin carga registrada':e.kg+' kg')+' · '+e.reps+' reps · RIR '+e.rir;
   $('previous').textContent=prior?'Semana anterior · '+stats(prior):'';
   const ex=plan?.weeks[+f.week-1]?.[+f.day-1]?.find(x=>x[0]===f.exercise);
-  $('choices').value=ex?ex[0]:'';
+
   $('target').textContent=ex?ex[1]+' series · '+ex[2]+' reps\nRIR objetivo '+ex[4]+' · Descanso '+ex[5]+(ex[3]?'\n'+ex[3]:''):'';
   const rows=entries.filter(e=>e.week===+f.week && e.day===+f.day && e.date===f.date);
   $('history').replaceChildren(...rows.map(e=>{
@@ -98,9 +163,14 @@ function init(){
   renderPlan();
   $('client').value=localStorage.getItem(ns+'client') || '';
 }
+for(const id of ['week','day','date']){
+  $(id).onchange=localAction(()=>{
+    $('exercise').value='';$('set').value=1;
+    for(const field of ['kg','reps','rir']) $(field).value='';
+    draft();renderPlan();
+  });
+}
 $('entry').oninput=localAction(e=>{
-  if(e.target===$('choices')){$('exercise').value=e.target.value;$('set').value=1;}
-  if(['week','day'].includes(e.target.id)){ $('exercise').value='';$('set').value=1;renderPlan(); }
   draft(); render(); $('local').textContent='Borrador guardado en este dispositivo.';
 });
 $('entry').onsubmit=localAction(e=>{
@@ -110,7 +180,7 @@ $('entry').onsubmit=localAction(e=>{
     week:+f.week,day:+f.day,set:+f.set,kg:f.kg===''?null:+f.kg,reps:+f.reps,rir:+f.rir});
   localStorage.setItem(ns+'set.'+entry.id,JSON.stringify(entry));
   $('set').value=Math.min(100,entry.set+1);$('reps').value='';$('rir').value='';
-  draft();render();$('local').textContent='Serie guardada en este dispositivo.';schedule();
+  draft();renderPlan();$('local').textContent='Serie guardada en este dispositivo.';schedule();
 });
 $('export').onclick=localAction(()=>{
   const url=URL.createObjectURL(new Blob([JSON.stringify(backup(),null,2)],{type:'application/json'}));
