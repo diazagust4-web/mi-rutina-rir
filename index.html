@@ -10,7 +10,7 @@
 #manual summary{margin-bottom:10px}
 dialog{width:min(92vw,460px);border:1px solid #d7ded4;border-radius:16px;color:#193d38;padding:20px}dialog::backdrop{background:#15292488}#history button{width:auto;margin-top:6px}#edit-error{color:#8b301e}
 #elapsed{display:block;font-size:clamp(2.4rem,9vw,3.4rem);font-weight:650;font-variant-numeric:tabular-nums;line-height:1.1;margin:0 0 1rem}
-</style><script defer src="app.js?v=4"></script></head>
+</style><script defer src="app.js?v=5"></script></head>
 <body><header><h1>Mi Rutina <span>RIR</span></h1></header><main><p id="alerts" role="alert"></p>
 <section aria-labelledby="clock-title"><h2 id="clock-title">Tiempo de entrenamiento</h2>
 <span id="elapsed" role="timer" aria-label="Tiempo transcurrido">00:00:00</span>
@@ -18,6 +18,11 @@ dialog{width:min(92vw,460px);border:1px solid #d7ded4;border-radius:16px;color:#
 <section><h2>Rutina del día</h2><label>Fecha<input id="date" type="date" required></label>
 <div class="row"><label>Semana<select id="week"></select></label><label>Día<select id="day"></select></label></div>
 <p id="local" role="status"></p><p id="cloud" role="status">Drive desconectado.</p></section>
+<details id="add-panel"><summary>+ Agregar ejercicio</summary>
+<form id="new-exercise"><p>Se agrega al día elegido desde esta semana hasta la semana 8. Las series que agregues a un ejercicio también se repetirán.</p>
+<label>Nombre del ejercicio<input id="new-name" required maxlength="120" autocomplete="off"></label>
+<label>Cantidad de series<input id="new-count" type="number" min="1" max="100" value="3" required></label>
+<button class="primary">Agregar a la rutina</button></form></details>
 <div id="session"></div>
 <details id="manual"><summary>Registrar una serie adicional</summary><form id="entry"><label>Ejercicio<input id="exercise" required maxlength="120" placeholder="Nombre del ejercicio" autocomplete="off"></label>
 <p class="note" id="target"></p><label>Serie<input id="set" type="number" min="1" max="100" value="1" required></label>
@@ -32,6 +37,7 @@ dialog{width:min(92vw,460px);border:1px solid #d7ded4;border-radius:16px;color:#
 <label>Reps<input id="edit-reps" type="number" inputmode="numeric" min="1" max="999" required></label>
 <label>RIR real<input id="edit-rir" type="number" inputmode="numeric" min="0" max="99" required></label></div>
 <p id="edit-error" role="alert"></p><div class="row"><button id="edit-cancel" type="button">Cancelar</button><button class="primary">Guardar cambios</button></div></form></dialog></body></html>
+
 
 
 

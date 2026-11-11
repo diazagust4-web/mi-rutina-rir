@@ -34,14 +34,24 @@ function validateEntry(e) {
   }
   return entry;
 }
+const normalizeName=name=>name.trim().replace(/\s+/g,' ').toLocaleLowerCase('es');
+function validateChange(c){
+  ensure(c && typeof c.id==='string' && /^[a-f0-9-]{36}$/i.test(c.id) &&
+    ['exercise','set'].includes(c.kind) && integer(c.week,1,8) && integer(c.day,1,5) &&
+    string(c.exercise,120) && c.exercise.trim() && integer(c.base,1,100) && Number.isSafeInteger(c.created));
+  return {id:c.id,kind:c.kind,week:c.week,day:c.day,exercise:c.exercise.trim(),base:c.base,created:c.created};
+}
 function backup() {
   const entries=Object.keys(localStorage).filter(k=>k.startsWith(ns+'set.')).sort()
     .map(k=>validateEntry(JSON.parse(localStorage.getItem(k))));
-  return {format:'mi-rutina-rir-v1',plan:JSON.parse(localStorage.getItem(ns+'plan')),entries};
+  const changes=Object.keys(localStorage).filter(k=>k.startsWith(ns+'change.')).sort()
+    .map(k=>validateChange(JSON.parse(localStorage.getItem(k))));
+  return {format:changes.length?'mi-rutina-rir-v2':'mi-rutina-rir-v1',plan:JSON.parse(localStorage.getItem(ns+'plan')),entries,changes};
 }
 function parseBackup(b) {
-  ensure(b?.format==='mi-rutina-rir-v1' && Array.isArray(b.entries));
-  return {format:b.format,plan:b.plan===null?null:validatePlan(b.plan),entries:b.entries.map(validateEntry)};
+  ensure(['mi-rutina-rir-v1','mi-rutina-rir-v2'].includes(b?.format) && Array.isArray(b.entries));
+  ensure(b.format==='mi-rutina-rir-v1' && b.changes===undefined || Array.isArray(b.changes));
+  return {format:b.format,plan:b.plan===null?null:validatePlan(b.plan),entries:b.entries.map(validateEntry),changes:(b.changes||[]).map(validateChange).sort((a,b)=>a.id.localeCompare(b.id))};
 }
 function merge(b) {
   const existing=backup();
@@ -57,7 +67,14 @@ function merge(b) {
     }
     seen.set(e.id,e);
   }
+  const changes=new Map(existing.changes.map(c=>[c.id,JSON.stringify(c)]));
+  for(const change of b.changes||[]){
+    const value=JSON.stringify(change);
+    ensure(!changes.has(change.id)||changes.get(change.id)===value,'Hay dos cambios incompatibles con el mismo identificador.');
+    changes.set(change.id,value);
+  }
   if(b.plan && !existing.plan) localStorage.setItem(ns+'plan',JSON.stringify(b.plan));
+  for(const [id,value] of changes)if(localStorage.getItem(ns+'change.'+id)===null)localStorage.setItem(ns+'change.'+id,value);
   for(const e of seen.values()) {
     const key=ns+'set.'+e.id;
     const value=JSON.stringify(e);
@@ -75,6 +92,38 @@ function element(tag, text, className){
   if(className) node.className=className;
   return node;
 }
+function dayExercises(data,week,day){
+  const exercises=(data.plan?.weeks[week-1]?.[day-1]||[]).map(ex=>[...ex]);
+  const groups=new Map();
+  for(const c of data.changes.filter(c=>c.day===day && c.week<=week).sort((a,b)=>a.week-b.week || a.created-b.created || a.id.localeCompare(b.id))){
+    const key=normalizeName(c.exercise);
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(c);
+  }
+  for(const [name,changes] of groups){
+    let ex=exercises.find(x=>normalizeName(x[0])===name);
+    const initial=changes.find(c=>c.kind==='exercise')||changes[0];
+    if(!ex){ex=[initial.exercise,initial.base,'','','',''];exercises.push(ex);}
+    if(changes.some(c=>c.kind==='exercise'))ex[1]=Math.max(ex[1],initial.base);
+    ex[1]=Math.min(100,ex[1]+changes.filter(c=>c.kind==='set').length);
+  }
+  return exercises;
+}
+function addChange(kind,exercise,base){
+  const change=validateChange({kind,exercise,base,week:+$('week').value,day:+$('day').value,id:crypto.randomUUID(),created:Date.now()});
+  localStorage.setItem(ns+'change.'+change.id,JSON.stringify(change));
+  renderPlan();schedule();
+  $('local').textContent='Cambio guardado para este día desde la semana '+change.week+'.';
+}
+$('new-exercise').onsubmit=localAction(event=>{
+  event.preventDefault();
+  const name=$('new-name').value.trim();
+  ensure(name,'Escribí el nombre del ejercicio.');
+  const exercises=dayExercises(backup(),+$('week').value,+$('day').value);
+  ensure(!exercises.some(ex=>normalizeName(ex[0])===normalizeName(name)),'Ese ejercicio ya está en este día. Podés agregarle una serie.');
+  addChange('exercise',name,+$('new-count').value);
+  $('new-exercise').reset();$('add-panel').open=false;
+});
 function renderSession(exercises){
   const session=$('session');
   const date=$('date').value, week=+$('week').value, day=+$('day').value;
@@ -90,7 +139,7 @@ function renderSession(exercises){
     let card=session.children[i];
     if(rebuild){
       card=element('section',undefined,'exercise');
-      card.append(element('h3',exercise),element('p',count+' series · '+reps+' reps\nRIR objetivo '+rir+' · Descanso '+rest+(tempo?'\n'+tempo:''),'note'));
+      card.append(element('h3',exercise),element('p',[count+(count===1?' serie':' series'),reps && reps+' reps',rir && 'RIR objetivo '+rir,rest && 'Descanso '+rest,tempo].filter(Boolean).join(' · '),'note'));
       const columns=element('div',undefined,'columns');
       for(const label of ['Serie','Kilos','Reps','RIR']) columns.append(element('span',label));
       card.append(columns);session.append(card);
@@ -132,14 +181,21 @@ function renderSession(exercises){
       }
       if(old)old.replaceWith(form);else card.append(form);
     }
+    if(rebuild){
+      const add=element('button','+ Agregar serie');
+      add.type='button';add.disabled=count>=100;
+      add.onclick=localAction(()=>addChange('set',exercise,count));
+      card.append(add);
+    }
   }
 }
 function renderPlan(){
-  plan=backup().plan;
+  const data=backup();
+  plan=data.plan;
   const day=$('day').value || '1';
   options($('day'),(plan?.days || names).map((n,i)=>[n,i+1]));
   $('day').value=day;
-  const exercises=plan?.weeks[+$('week').value-1]?.[+day-1] || [];
+  const exercises=dayExercises(data,+$('week').value,+day);
   renderSession(exercises);
   if(!exercises.length) $('manual').open=true;
   render();
@@ -333,7 +389,7 @@ async function sync(){
 $('sync').onclick=sync;
 window.addEventListener('online',sync);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)sync();});
-window.addEventListener('storage',localAction(e=>{if(e.key?.startsWith(ns+'set.')||e.key===ns+'plan'){renderPlan();schedule();}}));
+window.addEventListener('storage',localAction(e=>{if(e.key?.startsWith(ns+'set.')||e.key?.startsWith(ns+'change.')||e.key===ns+'plan'){renderPlan();schedule();}}));
 setInterval(()=>{if(!document.hidden)sync();},60000);
 try{init();}catch(e){alertUser('No se pudo leer el almacenamiento local. '+e.message);}
 
@@ -376,5 +432,6 @@ function initStopwatch(){
   refresh();
 }
 try{initStopwatch();}catch(e){alertUser('No se pudo iniciar el cronómetro. '+e.message);}
+
 
 
