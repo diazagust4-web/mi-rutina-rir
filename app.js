@@ -36,6 +36,11 @@ function validateEntry(e) {
 }
 const normalizeName=name=>name.trim().replace(/\s+/g,' ').toLocaleLowerCase('es');
 function validateChange(c){
+  if(c?.kind==='order'){
+    ensure(/^[a-f0-9-]{36}$/i.test(c.id) && integer(c.week,1,8) && integer(c.day,1,5) && Number.isSafeInteger(c.created) &&
+      Array.isArray(c.names) && c.names.length>1 && c.names.every(n=>string(n,120)&&n.trim()));
+    return {id:c.id,kind:'order',week:c.week,day:c.day,names:c.names,created:c.created};
+  }
   ensure(c && typeof c.id==='string' && /^[a-f0-9-]{36}$/i.test(c.id) &&
     ['exercise','set'].includes(c.kind) && integer(c.week,1,8) && integer(c.day,1,5) &&
     string(c.exercise,120) && c.exercise.trim() && integer(c.base,1,100) && Number.isSafeInteger(c.created));
@@ -95,7 +100,9 @@ function element(tag, text, className){
 function dayExercises(data,week,day){
   const exercises=(data.plan?.weeks[week-1]?.[day-1]||[]).map(ex=>[...ex]);
   const groups=new Map();
+  let order=[];
   for(const c of data.changes.filter(c=>c.day===day && c.week<=week).sort((a,b)=>a.week-b.week || a.created-b.created || a.id.localeCompare(b.id))){
+    if(c.kind==='order'){order=c.names;continue;}
     const key=normalizeName(c.exercise);
     if(!groups.has(key))groups.set(key,[]);
     groups.get(key).push(c);
@@ -107,8 +114,59 @@ function dayExercises(data,week,day){
     if(changes.some(c=>c.kind==='exercise'))ex[1]=Math.max(ex[1],initial.base);
     ex[1]=Math.min(100,ex[1]+changes.filter(c=>c.kind==='set').length);
   }
-  return exercises;
+  const rank=new Map(order.map((name,i)=>[normalizeName(name),i]));
+  return exercises.sort((a,b)=>(rank.get(normalizeName(a[0]))??Infinity)-(rank.get(normalizeName(b[0]))??Infinity));
 }
+let orderDraft=[];
+function drawOrder(){
+  $('order-list').replaceChildren(...orderDraft.map((name,i)=>{
+    const row=element('li',name);
+    for(const [step,icon,label] of [[-1,'↑','Subir'],[1,'↓','Bajar']]){
+      const button=element('button',icon);
+      button.setAttribute('aria-label',label+' '+name);
+      const to=i+step;button.disabled=to<0||to>=orderDraft.length;
+      button.onclick=()=>{[orderDraft[to],orderDraft[i]]=[orderDraft[i],orderDraft[to]];drawOrder();
+        $('order-list').children[to].querySelector('button:not(:disabled)')?.focus();};
+      row.append(button);
+    }
+    return row;
+  }));
+}
+$('order-open').onclick=()=>{
+  orderDraft=dayExercises(backup(),+$('week').value,+$('day').value).map(x=>x[0]);
+  drawOrder();$('order-dialog').showModal();
+};
+$('order-save').onclick=localAction(()=>{
+  const change=validateChange({kind:'order',week:+$('week').value,day:+$('day').value,id:crypto.randomUUID(),created:Date.now(),names:orderDraft});
+  localStorage.setItem(ns+'change.'+change.id,JSON.stringify(change));
+  $('order-dialog').close();renderPlan();schedule();
+  $('local').textContent='Orden guardado desde la semana '+change.week+'.';
+});
+$('order-cancel').onclick=()=>$('order-dialog').close();
+const atlasNames=[
+  ['Aductores en máquina','Peso muerto rumano','Gemelos prensa','Prensa','Sillón de isquios','Sentadilla búlgara'],
+  ['Press de banca','Press de hombro con mancuerna','JM press en smith','Cruces poleas sentado / aperturas','Vuelos laterales polea','Press inclinado con mancuernas'],
+  ['Jalón diagonal','Remo con mancuerna 1 brazo','Remo pecho apoyado','Bíceps con mancuerna','Bíceps en banco inclinado','Bíceps martillo con mancuerna'],
+  ['Sentadilla con barra','Sillón de cuadriceps','Vuelos laterales mancuerna','Vuelos posteriores en polea 45°','Extensión de tríceps tras nuca','Crunch declinado']
+];
+const artKey=s=>normalizeName(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace('sillon isquios','sillon de isquios');
+const artwork=new Map(atlasNames.flatMap((sheet,j)=>sheet.map((name,i)=>[artKey(name),[j,i]])));
+function exerciseHeading(name){
+  const head=element('div',undefined,'exercise-head');
+  const tile=artwork.get(artKey(name));
+  if(tile){
+    const [sheet,index]=tile;
+    const picture=element('span',undefined,'picture');
+    picture.style.backgroundImage='url("./lamina-'+sheet+'.jpg")';
+    picture.style.backgroundPosition=(index%2*100)+'% '+(Math.floor(index/2)*50)+'%';
+    const button=element('button',undefined,'thumbnail');button.append(picture);
+    button.setAttribute('aria-label','Ver ilustración de '+name);
+    button.onclick=()=>{$('art-name').textContent=name;$('art-large').replaceChildren(picture.cloneNode());$('art').showModal();};
+    head.append(button);
+  }
+  head.append(element('h3',name));return head;
+}
+$('art-close').onclick=()=>$('art').close();
 function addChange(kind,exercise,base){
   const change=validateChange({kind,exercise,base,week:+$('week').value,day:+$('day').value,id:crypto.randomUUID(),created:Date.now()});
   localStorage.setItem(ns+'change.'+change.id,JSON.stringify(change));
@@ -139,9 +197,9 @@ function renderSession(exercises){
     let card=session.children[i];
     if(rebuild){
       card=element('section',undefined,'exercise');
-      card.append(element('h3',exercise),element('p',[count+(count===1?' serie':' series'),reps && reps+' reps',rir && 'RIR objetivo '+rir,rest && 'Descanso '+rest,tempo].filter(Boolean).join(' · '),'note'));
+      card.append(exerciseHeading(exercise),element('p',[count+(count===1?' serie':' series'),reps && reps+' reps',rir && 'RIR objetivo '+rir,rest && 'Descanso '+rest,tempo].filter(Boolean).join(' · '),'note'));
       const columns=element('div',undefined,'columns');
-      for(const label of ['Serie','Kilos','Reps','RIR']) columns.append(element('span',label));
+      for(const label of ['Serie','Anterior','Kilos','Reps','RIR','✓']) columns.append(element('span',label));
       card.append(columns);session.append(card);
     }
     const matching=entries.filter(e=>e.day===day && e.exercise.trim().toLocaleLowerCase()===exercise.trim().toLocaleLowerCase());
@@ -156,6 +214,9 @@ function renderSession(exercises){
       const draftKey=ns+'row.'+JSON.stringify([date,week,day,exercise,set]);
       const values=saved || JSON.parse(localStorage.getItem(draftKey)) || {};
       form.append(element('strong',String(set)));
+      const priorCell=element('small',previous?(previous.kg===null?'':previous.kg+' kg × ')+previous.reps:'—');
+      if(previous)priorCell.title='Semana anterior · '+previous.reps+' reps · RIR '+previous.rir;
+      form.append(priorCell);
       const inputs={};
       for(const [name,label,max] of [['kg','Kilos',2000],['reps','Repeticiones',999],['rir','RIR real',99]]){
         const input=element('input');
@@ -165,10 +226,12 @@ function renderSession(exercises){
         input.setAttribute('aria-label',exercise+', serie '+set+', '+label);
         input.value=values[name]??'';inputs[name]=input;form.append(input);
       }
-      if(previous) form.append(element('small','Semana anterior · '+(previous.kg===null?'Sin carga':previous.kg+' kg')+' · '+previous.reps+' reps · RIR '+previous.rir));
-      if(saved) form.append(element('span','✓ Guardada','saved'),editButton(saved));
+      if(saved){
+        const edit=editButton(saved);edit.textContent='✓';edit.className='saved';
+        edit.setAttribute('aria-label','Editar serie '+set);form.classList.add('complete');form.append(edit);
+      }
       else{
-        form.append(element('button','Guardar serie '+set));
+        const done=element('button','✓');done.setAttribute('aria-label','Guardar serie '+set);form.append(done);
         form.oninput=localAction(()=>localStorage.setItem(draftKey,JSON.stringify(Object.fromEntries(new FormData(form)))));
         form.onsubmit=localAction(event=>{
           event.preventDefault();
@@ -196,6 +259,7 @@ function renderPlan(){
   options($('day'),(plan?.days || names).map((n,i)=>[n,i+1]));
   $('day').value=day;
   const exercises=dayExercises(data,+$('week').value,+day);
+  $('order-open').disabled=exercises.length<2;
   renderSession(exercises);
   if(!exercises.length) $('manual').open=true;
   render();
