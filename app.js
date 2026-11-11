@@ -42,9 +42,14 @@ function validateChange(c){
     return {id:c.id,kind:'order',week:c.week,day:c.day,names:c.names,created:c.created};
   }
   ensure(c && typeof c.id==='string' && /^[a-f0-9-]{36}$/i.test(c.id) &&
-    ['exercise','set'].includes(c.kind) && integer(c.week,1,8) && integer(c.day,1,5) &&
+    ['exercise','set','remove','replace'].includes(c.kind) && integer(c.week,1,8) && integer(c.day,1,5) &&
     string(c.exercise,120) && c.exercise.trim() && integer(c.base,1,100) && Number.isSafeInteger(c.created));
-  return {id:c.id,kind:c.kind,week:c.week,day:c.day,exercise:c.exercise.trim(),base:c.base,created:c.created};
+  const change={id:c.id,kind:c.kind,week:c.week,day:c.day,exercise:c.exercise.trim(),base:c.base,created:c.created};
+  if(c.kind==='replace'){
+    ensure(string(c.next,120)&&c.next.trim()&&normalizeName(c.next)!==normalizeName(c.exercise));
+    change.next=c.next.trim();
+  }
+  return change;
 }
 function backup() {
   const entries=Object.keys(localStorage).filter(k=>k.startsWith(ns+'set.')).sort()
@@ -99,23 +104,33 @@ function element(tag, text, className){
 }
 function dayExercises(data,week,day){
   const exercises=(data.plan?.weeks[week-1]?.[day-1]||[]).map(ex=>[...ex]);
-  const groups=new Map();
-  let order=[];
+  const removed=new Set();
   for(const c of data.changes.filter(c=>c.day===day && c.week<=week).sort((a,b)=>a.week-b.week || a.created-b.created || a.id.localeCompare(b.id))){
-    if(c.kind==='order'){order=c.names;continue;}
+    if(c.kind==='order'){
+      const rank=new Map(c.names.map((name,i)=>[normalizeName(name),i]));
+      exercises.sort((a,b)=>(rank.get(normalizeName(a[0]))??Infinity)-(rank.get(normalizeName(b[0]))??Infinity));
+      continue;
+    }
     const key=normalizeName(c.exercise);
-    if(!groups.has(key))groups.set(key,[]);
-    groups.get(key).push(c);
+    const index=exercises.findIndex(ex=>normalizeName(ex[0])===key);
+    if(c.kind==='remove'||c.kind==='replace'){
+      if(index>=0)exercises.splice(index,1);
+      removed.add(key);
+      if(c.kind==='replace'){
+        const nextKey=normalizeName(c.next);
+        removed.delete(nextKey);
+        if(!exercises.some(ex=>normalizeName(ex[0])===nextKey))
+          exercises.splice(index<0?exercises.length:index,0,[c.next,c.base,'','','','']);
+      }
+      continue;
+    }
+    if(c.kind==='exercise')removed.delete(key);
+    if(removed.has(key))continue;
+    const ex=exercises[index]||[c.exercise,c.base,'','','',''];
+    if(index<0)exercises.push(ex);
+    ex[1]=c.kind==='set'?Math.min(100,ex[1]+1):Math.max(c.base,ex[1]);
   }
-  for(const [name,changes] of groups){
-    let ex=exercises.find(x=>normalizeName(x[0])===name);
-    const initial=changes.find(c=>c.kind==='exercise')||changes[0];
-    if(!ex){ex=[initial.exercise,initial.base,'','','',''];exercises.push(ex);}
-    if(changes.some(c=>c.kind==='exercise'))ex[1]=Math.max(ex[1],initial.base);
-    ex[1]=Math.min(100,ex[1]+changes.filter(c=>c.kind==='set').length);
-  }
-  const rank=new Map(order.map((name,i)=>[normalizeName(name),i]));
-  return exercises.sort((a,b)=>(rank.get(normalizeName(a[0]))??Infinity)-(rank.get(normalizeName(b[0]))??Infinity));
+  return exercises;
 }
 let orderDraft=[];
 function drawOrder(){
@@ -147,10 +162,13 @@ const atlasNames=[
   ['Aductores en máquina','Peso muerto rumano','Gemelos prensa','Prensa','Sillón de isquios','Sentadilla búlgara'],
   ['Press de banca','Press de hombro con mancuerna','JM press en smith','Cruces poleas sentado / aperturas','Vuelos laterales polea','Press inclinado con mancuernas'],
   ['Jalón diagonal','Remo con mancuerna 1 brazo','Remo pecho apoyado','Bíceps con mancuerna','Bíceps en banco inclinado','Bíceps martillo con mancuerna'],
-  ['Sentadilla con barra','Sillón de cuadriceps','Vuelos laterales mancuerna','Vuelos posteriores en polea 45°','Extensión de tríceps tras nuca','Crunch declinado']
+  ['Sentadilla con barra','Sillón de cuadriceps','Vuelos laterales mancuerna','Vuelos posteriores en polea 45°','Extensión de tríceps tras nuca','Crunch declinado'],
+  ['Flexiones de brazos','Dominadas','Puente de glúteos','Remo sentado en polea','Zancadas con mancuernas','Extensión de tríceps con cuerda']
 ];
 const artKey=s=>normalizeName(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace('sillon isquios','sillon de isquios');
 const artwork=new Map(atlasNames.flatMap((sheet,j)=>sheet.map((name,i)=>[artKey(name),[j,i]])));
+for(const name of atlasNames.flat().sort((a,b)=>a.localeCompare(b,'es'))) $('catalog').append(new Option(name));
+for(const [alias,name] of Object.entries({'flexiones':'Flexiones de brazos','lagartijas':'Flexiones de brazos','pull ups':'Dominadas','remo en polea baja':'Remo sentado en polea','estocadas con mancuernas':'Zancadas con mancuernas','tríceps en polea con cuerda':'Extensión de tríceps con cuerda'}))artwork.set(artKey(alias),artwork.get(artKey(name)));
 function exerciseHeading(name){
   const head=element('div',undefined,'exercise-head');
   const tile=artwork.get(artKey(name));
@@ -167,12 +185,33 @@ function exerciseHeading(name){
   head.append(element('h3',name));return head;
 }
 $('art-close').onclick=()=>$('art').close();
-function addChange(kind,exercise,base){
-  const change=validateChange({kind,exercise,base,week:+$('week').value,day:+$('day').value,id:crypto.randomUUID(),created:Date.now()});
+function addChange(kind,exercise,base,next){
+  const change=validateChange({kind,exercise,base,next,week:+$('week').value,day:+$('day').value,id:crypto.randomUUID(),created:Date.now()});
   localStorage.setItem(ns+'change.'+change.id,JSON.stringify(change));
   renderPlan();schedule();
   $('local').textContent='Cambio guardado para este día desde la semana '+change.week+'.';
 }
+let managing;
+function manageExercise(name,count){
+  managing={name,count};
+  $('manage-title').textContent=name;
+  $('replace-name').value='';$('replace-count').value=count;$('manage-error').textContent='';
+  $('manage').showModal();
+}
+$('manage-close').onclick=()=>$('manage').close();
+$('remove-ex').onclick=localAction(()=>{
+  if(!confirm('¿Quitar '+managing.name+' de este día desde la semana '+$('week').value+'? Las series registradas quedan en el historial.'))return;
+  addChange('remove',managing.name,managing.count);$('manage').close();
+});
+$('replace-form').onsubmit=event=>{
+  event.preventDefault();
+  try{
+    const next=$('replace-name').value.trim();
+    ensure(next,'Escribí el nombre del nuevo ejercicio.');
+    ensure(!dayExercises(backup(),+$('week').value,+$('day').value).some(ex=>normalizeName(ex[0])===normalizeName(next)),'Ese ejercicio ya figura en el día.');
+    addChange('replace',managing.name,+$('replace-count').value,next);$('manage').close();
+  }catch(e){$('manage-error').textContent=e.message;}
+};
 $('new-exercise').onsubmit=localAction(event=>{
   event.preventDefault();
   const name=$('new-name').value.trim();
@@ -198,6 +237,9 @@ function renderSession(exercises){
     if(rebuild){
       card=element('section',undefined,'exercise');
       card.append(exerciseHeading(exercise),element('p',[count+(count===1?' serie':' series'),reps && reps+' reps',rir && 'RIR objetivo '+rir,rest && 'Descanso '+rest,tempo].filter(Boolean).join(' · '),'note'));
+      const menu=element('button','⋯','manage-button');
+      menu.setAttribute('aria-label','Reemplazar o quitar '+exercise);
+      menu.onclick=()=>manageExercise(exercise,count);card.firstChild.append(menu);
       const columns=element('div',undefined,'columns');
       for(const label of ['Serie','Anterior','Kilos','Reps','RIR','✓']) columns.append(element('span',label));
       card.append(columns);session.append(card);
@@ -274,10 +316,22 @@ function render(){
 
   $('target').textContent=ex?ex[1]+' series · '+ex[2]+' reps\nRIR objetivo '+ex[4]+' · Descanso '+ex[5]+(ex[3]?'\n'+ex[3]:''):'';
   const rows=entries.filter(e=>e.week===+f.week && e.day===+f.day && e.date===f.date);
-  $('history').replaceChildren(...rows.map(e=>{
-    const li=document.createElement('li'), small=document.createElement('small');
-    li.textContent=e.exercise+' · Serie '+e.set;
-    small.textContent=stats(e);li.append(small,editButton(e));return li;
+  const expanded=new Set(Array.from($('history').querySelectorAll('details[open]'),g=>g.dataset.key));
+  const groups=new Map();
+  for(const e of rows){
+    const key=normalizeName(e.exercise);
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(e);
+  }
+  $('history-count').textContent=String(rows.length);
+  $('history').replaceChildren(...Array.from(groups,([key,sets])=>{
+    const group=element('details');group.dataset.key=key;group.open=expanded.has(key);
+    group.append(element('summary',sets[0].exercise+' · '+sets.length+(sets.length===1?' serie':' series')));
+    const list=element('ul');
+    for(const e of sets.sort((a,b)=>a.set-b.set)){
+      const li=element('li','Serie '+e.set);li.append(element('small',stats(e)),editButton(e));list.append(li);
+    }
+    group.append(list);return group;
   }));
   if(!rows.length) $('history').textContent='Todavía no registraste series para esta fecha, semana y día.';
 }
@@ -451,6 +505,12 @@ async function sync(){
   }finally{running=false;if(again){again=false;schedule();}}
 }
 $('sync').onclick=sync;
+$('drive-top').onclick=()=>{
+  if(token && Date.now()<expires){sync();return;}
+  if(token)disconnect('Volvé a conectar Google Drive.');
+  if($('client').value.trim())$('connect').click();
+  else{$('settings').open=true;$('client').focus();$('client').scrollIntoView({block:'center'});}
+};
 window.addEventListener('online',sync);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)sync();});
 window.addEventListener('storage',localAction(e=>{if(e.key?.startsWith(ns+'set.')||e.key?.startsWith(ns+'change.')||e.key===ns+'plan'){renderPlan();schedule();}}));
