@@ -337,4 +337,44 @@ window.addEventListener('storage',localAction(e=>{if(e.key?.startsWith(ns+'set.'
 setInterval(()=>{if(!document.hidden)sync();},60000);
 try{init();}catch(e){alertUser('No se pudo leer el almacenamiento local. '+e.message);}
 
+function initStopwatch(){
+  const key=ns+'stopwatch';
+  const initial={elapsed:0,started:null};
+  const read=()=>JSON.parse(localStorage.getItem(key)) || initial;
+  let state=read();
+  function elapsed(now){
+    return state.elapsed+(state.started===null?0:Math.max(0,now-state.started));
+  }
+  function display(){
+    const seconds=Math.floor(elapsed(Date.now())/1000);
+    const parts=[Math.floor(seconds/3600),Math.floor(seconds/60)%60,seconds%60];
+    const value=parts.map(n=>String(n).padStart(2,'0')).join(':');
+    if($('elapsed').textContent!==value) $('elapsed').textContent=value;
+  }
+  function refresh(){
+    state=read();
+    display();
+    $('clock-toggle').textContent=state.started!==null?'Pausar':state.elapsed?'Continuar':'Iniciar';
+    $('clock-reset').disabled=state.started===null && !state.elapsed;
+  }
+  $('clock-toggle').onclick=localAction(()=>{
+    state=read();
+    const now=Date.now();
+    const next=state.started===null?{elapsed:state.elapsed,started:now}:{elapsed:elapsed(now),started:null};
+    localStorage.setItem(key,JSON.stringify(next));
+    refresh();
+  });
+  $('clock-reset').onclick=localAction(()=>{
+    if(!window.confirm('¿Volver el cronómetro a cero?'))return;
+    localStorage.removeItem(key);
+    refresh();
+  });
+  window.addEventListener('storage',event=>{if(event.key===key || event.key===null)refresh();});
+  window.addEventListener('pageshow',refresh);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
+  setInterval(()=>{if(state.started!==null && !document.hidden)display();},250);
+  refresh();
+}
+try{initStopwatch();}catch(e){alertUser('No se pudo iniciar el cronómetro. '+e.message);}
+
 

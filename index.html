@@ -8,8 +8,13 @@
 .setrow button,.setrow .saved{grid-column:2/-1;min-height:40px}.saved{color:#245b4d;text-align:right;font-size:.85rem;align-content:center}
 .setrow small{grid-column:1/-1;color:#486150}.setrow input:disabled{color:#193d38;-webkit-text-fill-color:#193d38;opacity:1;background:#f2f5ef}
 #manual summary{margin-bottom:10px}
-dialog{width:min(92vw,460px);border:1px solid #d7ded4;border-radius:16px;color:#193d38;padding:20px}dialog::backdrop{background:#15292488}#history button{width:auto;margin-top:6px}#edit-error{color:#8b301e}</style><script defer src="app.js?v=3"></script></head>
+dialog{width:min(92vw,460px);border:1px solid #d7ded4;border-radius:16px;color:#193d38;padding:20px}dialog::backdrop{background:#15292488}#history button{width:auto;margin-top:6px}#edit-error{color:#8b301e}
+#elapsed{display:block;font-size:clamp(2.4rem,9vw,3.4rem);font-weight:650;font-variant-numeric:tabular-nums;line-height:1.1;margin:0 0 1rem}
+</style><script defer src="app.js?v=4"></script></head>
 <body><header><h1>Mi Rutina <span>RIR</span></h1></header><main><p id="alerts" role="alert"></p>
+<section aria-labelledby="clock-title"><h2 id="clock-title">Tiempo de entrenamiento</h2>
+<span id="elapsed" role="timer" aria-label="Tiempo transcurrido">00:00:00</span>
+<div class="row"><button id="clock-toggle" class="primary">Iniciar</button><button id="clock-reset" disabled>Reiniciar</button></div></section>
 <section><h2>Rutina del día</h2><label>Fecha<input id="date" type="date" required></label>
 <div class="row"><label>Semana<select id="week"></select></label><label>Día<select id="day"></select></label></div>
 <p id="local" role="status"></p><p id="cloud" role="status">Drive desconectado.</p></section>
