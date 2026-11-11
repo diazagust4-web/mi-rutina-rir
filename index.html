@@ -17,11 +17,11 @@ dialog{width:min(92vw,460px);border:1px solid #d7ded4;border-radius:16px;color:#
 .date-field{display:grid;grid-template-columns:minmax(0,1fr);width:100%;max-width:100%;min-width:0}
 #date{display:block;appearance:none;-webkit-appearance:none;box-sizing:border-box;min-width:0;max-width:100%;width:100%;margin-inline:0;text-align:left}
 #date::-webkit-date-and-time-value{text-align:left;min-width:0}
-#history details{padding:.65rem .75rem;margin:.5rem 0 0}#history summary{font-size:.95rem}#history-count{color:var(--muted);font-size:.88rem}#remove-ex{color:#96311f;background:#faece9;margin:.8rem 0}#manage-error{color:#96311f}</style><script defer src="app.js?v=7"></script></head>
+#history details{padding:.65rem .75rem;margin:.5rem 0 0}#history summary{font-size:.95rem}#history-count{color:var(--muted);font-size:.88rem}#remove-ex{color:#96311f;background:#faece9;margin:.8rem 0}#manage-error{color:#96311f}#finish-workout{grid-column:1/-1;margin-top:8px}#finish-workout:disabled{display:none}</style><script defer src="app.js?v=8"></script></head>
 <body><header><h1>Mi Rutina <span>RIR</span></h1><button id="drive-top" aria-label="Sincronizar con Google Drive" title="Sincronizar con Google Drive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.1 8a8 8 0 0 1 13.4-2L20 9M4 15l1.5 3A8 8 0 0 0 19 16"/></svg></button></header><main><p id="alerts" role="alert"></p>
 <section aria-labelledby="clock-title"><h2 id="clock-title">Tiempo de entrenamiento</h2>
 <span id="elapsed" role="timer" aria-label="Tiempo transcurrido">00:00:00</span>
-<div class="row"><button id="clock-toggle" class="primary">Iniciar</button><button id="clock-reset" disabled>Reiniciar</button></div></section>
+<div class="row"><button id="clock-toggle" class="primary">Iniciar</button><button id="clock-reset" disabled>Reiniciar</button></div><button id="finish-workout" class="primary" disabled>Finalizar entrenamiento</button></section>
 <section><h2>Rutina del día</h2><label class="date-field">Fecha<input id="date" type="date" required></label>
 <div class="row"><label>Semana<select id="week"></select></label><label>Día<select id="day"></select></label></div>
 <p id="local" role="status"></p><p id="cloud" role="status">Drive desconectado.</p></section>
@@ -35,7 +35,7 @@ dialog{width:min(92vw,460px);border:1px solid #d7ded4;border-radius:16px;color:#
 <p class="note" id="target"></p><label>Serie<input id="set" type="number" min="1" max="100" value="1" required></label>
 <div class="row three"><label>Kilos<input id="kg" type="number" inputmode="decimal" min="0" max="2000" step="any" placeholder="Opcional"></label><label>Reps<input id="reps" type="number" inputmode="numeric" min="1" max="999" required></label><label>RIR real<input id="rir" type="number" inputmode="numeric" min="0" max="99" required></label></div>
 <p id="previous" class="note"></p><button class="primary">Guardar serie</button></form></details>
-<details id="history-panel"><summary>Series del día seleccionado · <span id="history-count">0</span></summary><div id="history"></div></details>
+<details id="workout-history"><summary>Entrenamientos finalizados · <span id="workout-count">0</span></summary><ul id="workouts"></ul></details><details id="history-panel"><summary>Series del día seleccionado · <span id="history-count">0</span></summary><div id="history"></div></details>
 <details id="settings"><summary>Copias y Google Drive</summary><p>Conectá tu cuenta para sincronizar las series mientras la app está abierta.</p>
 <label>Client ID de Google<input id="client" placeholder="…apps.googleusercontent.com" autocapitalize="none" spellcheck="false"></label><button id="connect">Conectar Google Drive</button><div class="row"><button id="sync" disabled>Sincronizar</button><button id="off" disabled>Desconectar</button></div><hr>
 <p>Exportá tus series y tu plantilla juntas. Al importar una copia, se combinan las series sin duplicarlas.</p><button id="export">Exportar JSON</button><label>Importar copia o plantilla privada<input type="file" id="import" accept=".json,application/json"></label></details></main><dialog id="editor" aria-labelledby="edit-title"><form id="edit-form">
@@ -47,6 +47,7 @@ dialog{width:min(92vw,460px);border:1px solid #d7ded4;border-radius:16px;color:#
 <dialog id="art" aria-labelledby="art-name"><h2 id="art-name"></h2><div id="art-large"></div><button id="art-close">Cerrar</button></dialog><datalist id="catalog"></datalist><dialog id="manage" aria-labelledby="manage-title"><h2 id="manage-title"></h2><p>El cambio se aplica a este día desde la semana elegida. Las series registradas quedan en el historial.</p>
 <form id="replace-form"><label>Reemplazar por<input id="replace-name" list="catalog" required maxlength="120" placeholder="Elegí o escribí un ejercicio"></label><label>Cantidad de series<input id="replace-count" type="number" min="1" max="100" required></label><p role="alert" id="manage-error"></p><button class="primary">Reemplazar ejercicio</button></form>
 <button id="remove-ex">Quitar de la rutina</button><button id="manage-close">Cancelar</button></dialog></body></html>
+
 
 
 

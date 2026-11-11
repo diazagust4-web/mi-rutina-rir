@@ -51,17 +51,30 @@ function validateChange(c){
   }
   return change;
 }
+function validateWorkout(w){
+  ensure(w && typeof w.id==='string' && /^[a-f0-9-]{36}$/i.test(w.id) && /^\d{4}-\d{2}-\d{2}$/.test(w.date) &&
+    integer(w.week,1,8) && integer(w.day,1,5) && string(w.label,80) && Number.isSafeInteger(w.finished) &&
+    Number.isSafeInteger(w.duration) && w.duration>=0 && Array.isArray(w.sets) && w.sets.every(id=>typeof id==='string' && /^[a-f0-9-]{36}$/i.test(id)));
+  return {id:w.id,date:w.date,week:w.week,day:w.day,label:w.label,finished:w.finished,duration:w.duration,sets:w.sets};
+}
+function durationText(ms){
+  const s=Math.floor(ms/1000);
+  return [Math.floor(s/3600),Math.floor(s/60)%60,s%60].map(n=>String(n).padStart(2,'0')).join(':');
+}
 function backup() {
   const entries=Object.keys(localStorage).filter(k=>k.startsWith(ns+'set.')).sort()
     .map(k=>validateEntry(JSON.parse(localStorage.getItem(k))));
   const changes=Object.keys(localStorage).filter(k=>k.startsWith(ns+'change.')).sort()
     .map(k=>validateChange(JSON.parse(localStorage.getItem(k))));
-  return {format:changes.length?'mi-rutina-rir-v2':'mi-rutina-rir-v1',plan:JSON.parse(localStorage.getItem(ns+'plan')),entries,changes};
+  const workouts=Object.keys(localStorage).filter(k=>k.startsWith(ns+'workout.')).sort()
+    .map(k=>validateWorkout(JSON.parse(localStorage.getItem(k))));
+  return {format:workouts.length?'mi-rutina-rir-v3':changes.length?'mi-rutina-rir-v2':'mi-rutina-rir-v1',plan:JSON.parse(localStorage.getItem(ns+'plan')),entries,changes,workouts};
 }
 function parseBackup(b) {
-  ensure(['mi-rutina-rir-v1','mi-rutina-rir-v2'].includes(b?.format) && Array.isArray(b.entries));
+  ensure(['mi-rutina-rir-v1','mi-rutina-rir-v2','mi-rutina-rir-v3'].includes(b?.format) && Array.isArray(b.entries));
   ensure(b.format==='mi-rutina-rir-v1' && b.changes===undefined || Array.isArray(b.changes));
-  return {format:b.format,plan:b.plan===null?null:validatePlan(b.plan),entries:b.entries.map(validateEntry),changes:(b.changes||[]).map(validateChange).sort((a,b)=>a.id.localeCompare(b.id))};
+  ensure(b.format!=='mi-rutina-rir-v3' && b.workouts===undefined || Array.isArray(b.workouts));
+  return {format:b.format,plan:b.plan===null?null:validatePlan(b.plan),entries:b.entries.map(validateEntry),changes:(b.changes||[]).map(validateChange).sort((a,b)=>a.id.localeCompare(b.id)),workouts:(b.workouts||[]).map(validateWorkout).sort((a,b)=>a.id.localeCompare(b.id))};
 }
 function merge(b) {
   const existing=backup();
@@ -84,6 +97,11 @@ function merge(b) {
     changes.set(change.id,value);
   }
   if(b.plan && !existing.plan) localStorage.setItem(ns+'plan',JSON.stringify(b.plan));
+  for(const w of b.workouts||[]){
+    const key=ns+'workout.'+w.id, value=JSON.stringify(w), old=localStorage.getItem(key);
+    ensure(old===null || old===value,'Hay dos resúmenes distintos del mismo entrenamiento.');
+    if(old===null)localStorage.setItem(key,value);
+  }
   for(const [id,value] of changes)if(localStorage.getItem(ns+'change.'+id)===null)localStorage.setItem(ns+'change.'+id,value);
   for(const e of seen.values()) {
     const key=ns+'set.'+e.id;
@@ -296,6 +314,13 @@ function renderSession(exercises){
 }
 function renderPlan(){
   const data=backup();
+  $('workout-count').textContent=String(data.workouts.length);
+  $('workouts').replaceChildren(...data.workouts.sort((a,b)=>b.finished-a.finished).map(w=>{
+    const li=element('li',w.date.split('-').reverse().join('/')+' · '+w.label);
+    li.append(element('small','Semana '+w.week+' · '+durationText(w.duration)+' · '+w.sets.length+(w.sets.length===1?' serie':' series')));
+    return li;
+  }));
+  if(!data.workouts.length)$('workouts').textContent='Tus entrenamientos aparecerán acá al finalizarlos.';
   plan=data.plan;
   const day=$('day').value || '1';
   options($('day'),(plan?.days || names).map((n,i)=>[n,i+1]));
@@ -513,7 +538,7 @@ $('drive-top').onclick=()=>{
 };
 window.addEventListener('online',sync);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)sync();});
-window.addEventListener('storage',localAction(e=>{if(e.key?.startsWith(ns+'set.')||e.key?.startsWith(ns+'change.')||e.key===ns+'plan'){renderPlan();schedule();}}));
+window.addEventListener('storage',localAction(e=>{if(e.key?.startsWith(ns+'set.')||e.key?.startsWith(ns+'change.')||e.key?.startsWith(ns+'workout.')||e.key===ns+'plan'){renderPlan();schedule();}}));
 setInterval(()=>{if(!document.hidden)sync();},60000);
 try{init();}catch(e){alertUser('No se pudo leer el almacenamiento local. '+e.message);}
 
@@ -536,11 +561,14 @@ function initStopwatch(){
     display();
     $('clock-toggle').textContent=state.started!==null?'Pausar':state.elapsed?'Continuar':'Iniciar';
     $('clock-reset').disabled=state.started===null && !state.elapsed;
+    $('finish-workout').disabled=$('clock-reset').disabled;
   }
   $('clock-toggle').onclick=localAction(()=>{
     state=read();
     const now=Date.now();
-    const next=state.started===null?{elapsed:state.elapsed,started:now}:{elapsed:elapsed(now),started:null};
+    ensure(state.id || $('date').value,'Elegí la fecha del entrenamiento.');
+    const context=state.id?state:{...state,id:crypto.randomUUID(),date:$('date').value,week:+$('week').value,day:+$('day').value,label:$('day').selectedOptions[0].textContent};
+    const next=state.started===null?{...context,started:now}:{...context,elapsed:elapsed(now),started:null};
     localStorage.setItem(key,JSON.stringify(next));
     refresh();
   });
@@ -549,6 +577,22 @@ function initStopwatch(){
     localStorage.removeItem(key);
     refresh();
   });
+  $('finish-workout').onclick=localAction(()=>{
+    state=read();
+    if(state.started===null && !state.elapsed)return;
+    const date=state.date||$('date').value, week=state.week||+$('week').value, day=state.day||+$('day').value;
+    const label=state.label||$('day').selectedOptions[0].textContent, data=backup();
+    const assigned=new Set(data.workouts.flatMap(w=>w.sets));
+    const sets=data.entries.filter(e=>e.date===date && e.week===week && e.day===day && !assigned.has(e.id)).map(e=>e.id);
+    const finished=Date.now(), duration=elapsed(finished);
+    const w=validateWorkout({id:state.id||crypto.randomUUID(),date,week,day,label,finished,duration,sets});
+    if(!confirm('¿Finalizar '+label+' del '+date.split('-').reverse().join('/')+'?\nTiempo: '+durationText(duration)+' · Series: '+sets.length))return;
+    const keyWorkout=ns+'workout.'+w.id;
+    if(!localStorage.getItem(keyWorkout))localStorage.setItem(keyWorkout,JSON.stringify(w));
+    localStorage.removeItem(key);refresh();renderPlan();schedule();
+    $('local').textContent='Entrenamiento guardado · '+durationText(duration)+' · '+sets.length+' series.';
+    $('workout-history').open=true;
+  });
   window.addEventListener('storage',event=>{if(event.key===key || event.key===null)refresh();});
   window.addEventListener('pageshow',refresh);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
@@ -556,6 +600,7 @@ function initStopwatch(){
   refresh();
 }
 try{initStopwatch();}catch(e){alertUser('No se pudo iniciar el cronómetro. '+e.message);}
+
 
 
 
