@@ -42,9 +42,13 @@ function validateChange(c){
     return {id:c.id,kind:'order',week:c.week,day:c.day,names:c.names,created:c.created};
   }
   ensure(c && typeof c.id==='string' && /^[a-f0-9-]{36}$/i.test(c.id) &&
-    ['exercise','set','remove','replace'].includes(c.kind) && integer(c.week,1,8) && integer(c.day,1,5) &&
+    ['exercise','set','less','details','remove','replace'].includes(c.kind) && integer(c.week,1,8) && integer(c.day,1,5) &&
     string(c.exercise,120) && c.exercise.trim() && integer(c.base,1,100) && Number.isSafeInteger(c.created));
   const change={id:c.id,kind:c.kind,week:c.week,day:c.day,exercise:c.exercise.trim(),base:c.base,created:c.created};
+  if(c.details!==undefined || c.kind==='details'){
+    ensure(Array.isArray(c.details) && c.details.length===6 && c.details.every(v=>string(v,500)));
+    change.details=c.details.map(v=>v.trim());
+  }
   if(c.kind==='replace'){
     ensure(string(c.next,120)&&c.next.trim()&&normalizeName(c.next)!==normalizeName(c.exercise));
     change.next=c.next.trim();
@@ -138,15 +142,23 @@ function dayExercises(data,week,day){
         const nextKey=normalizeName(c.next);
         removed.delete(nextKey);
         if(!exercises.some(ex=>normalizeName(ex[0])===nextKey))
-          exercises.splice(index<0?exercises.length:index,0,[c.next,c.base,'','','','']);
+          exercises.splice(index<0?exercises.length:index,0,[c.next,c.base,...(c.details||['','','',''])]);
       }
       continue;
     }
     if(c.kind==='exercise')removed.delete(key);
     if(removed.has(key))continue;
+    if(c.kind==='less'||c.kind==='details'){
+      if(index>=0){
+        if(c.kind==='less') exercises[index][1]=Math.max(1,exercises[index][1]-1);
+        else exercises[index].splice(2,6,...c.details);
+      }
+      continue;
+    }
     const ex=exercises[index]||[c.exercise,c.base,'','','',''];
     if(index<0)exercises.push(ex);
     ex[1]=c.kind==='set'?Math.min(100,ex[1]+1):Math.max(c.base,ex[1]);
+    if(c.details)ex.splice(2,6,...c.details);
   }
   return exercises;
 }
@@ -203,19 +215,49 @@ function exerciseHeading(name){
   head.append(element('h3',name));return head;
 }
 $('art-close').onclick=()=>$('art').close();
-function addChange(kind,exercise,base,next){
-  const change=validateChange({kind,exercise,base,next,week:+$('week').value,day:+$('day').value,id:crypto.randomUUID(),created:Date.now()});
+function addChange(kind,exercise,base,next,details){
+  const change=validateChange({kind,exercise,base,next,details,week:+$('week').value,day:+$('day').value,id:crypto.randomUUID(),created:Date.now()});
   localStorage.setItem(ns+'change.'+change.id,JSON.stringify(change));
   renderPlan();schedule();
   $('local').textContent='Cambio guardado para este día desde la semana '+change.week+'.';
 }
 let managing;
-function manageExercise(name,count){
+const detailFields=[
+  ['Repeticiones objetivo','8–12 o 8 / 10 / 12'],
+  ['Ritmo o tempo','3-1-1'],
+  ['RIR objetivo','2 o 2 / 1 / 0'],
+  ['Descanso','90 s o 2–3 min'],
+  ['Fase excéntrica','3 segundos de bajada'],
+  ['Notas','Ajuste del banco, agarre u otra indicación']
+];
+for(const prefix of ['new','replace','edit-plan']){
+  const container=$(prefix+'-details');
+  detailFields.forEach(([title,hint],i)=>{
+    const label=element('label',title);
+    const input=element(i===5?'textarea':'input');
+    input.id=prefix+'-detail-'+i;input.maxLength=500;input.placeholder=hint;
+    label.append(input);container.append(label);
+  });
+}
+function detailValues(prefix){return detailFields.map((_,i)=>$(prefix+'-detail-'+i).value.trim());}
+function exerciseNote(ex){
+  const [,count,reps,tempo,rir,rest,eccentric,notes]=ex;
+  return [count+(count===1?' serie':' series'),reps && reps+' reps',rir && 'RIR objetivo '+rir,rest && 'Descanso '+rest,tempo,eccentric && 'Excéntrica '+eccentric].filter(Boolean).join(' · ')+(notes?'\n'+notes:'');
+}
+function manageExercise(ex){
+  const [name,count]=ex;
   managing={name,count};
+  $('replace-form').reset();
+  $('replace-details').open=false;
+  $('edit-plan-panel').open=false;
+  detailFields.forEach((_,i)=>$('edit-plan-detail-'+i).value=ex[i+2]||'');
   $('manage-title').textContent=name;
   $('replace-name').value='';$('replace-count').value=count;$('manage-error').textContent='';
   $('manage').showModal();
 }
+$('edit-plan-form').onsubmit=localAction(event=>{
+  event.preventDefault();addChange('details',managing.name,managing.count,undefined,detailValues('edit-plan'));$('manage').close();
+});
 $('manage-close').onclick=()=>$('manage').close();
 $('remove-ex').onclick=localAction(()=>{
   if(!confirm('¿Quitar '+managing.name+' de este día desde la semana '+$('week').value+'? Las series registradas quedan en el historial.'))return;
@@ -227,7 +269,7 @@ $('replace-form').onsubmit=event=>{
     const next=$('replace-name').value.trim();
     ensure(next,'Escribí el nombre del nuevo ejercicio.');
     ensure(!dayExercises(backup(),+$('week').value,+$('day').value).some(ex=>normalizeName(ex[0])===normalizeName(next)),'Ese ejercicio ya figura en el día.');
-    addChange('replace',managing.name,+$('replace-count').value,next);$('manage').close();
+    addChange('replace',managing.name,+$('replace-count').value,next,detailValues('replace'));$('manage').close();
   }catch(e){$('manage-error').textContent=e.message;}
 };
 $('new-exercise').onsubmit=localAction(event=>{
@@ -236,7 +278,7 @@ $('new-exercise').onsubmit=localAction(event=>{
   ensure(name,'Escribí el nombre del ejercicio.');
   const exercises=dayExercises(backup(),+$('week').value,+$('day').value);
   ensure(!exercises.some(ex=>normalizeName(ex[0])===normalizeName(name)),'Ese ejercicio ya está en este día. Podés agregarle una serie.');
-  addChange('exercise',name,+$('new-count').value);
+  addChange('exercise',name,+$('new-count').value,undefined,detailValues('new'));
   $('new-exercise').reset();$('add-panel').open=false;
 });
 function renderSession(exercises){
@@ -254,10 +296,10 @@ function renderSession(exercises){
     let card=session.children[i];
     if(rebuild){
       card=element('section',undefined,'exercise');
-      card.append(exerciseHeading(exercise),element('p',[count+(count===1?' serie':' series'),reps && reps+' reps',rir && 'RIR objetivo '+rir,rest && 'Descanso '+rest,tempo].filter(Boolean).join(' · '),'note'));
+      card.append(exerciseHeading(exercise),element('p',exerciseNote(ex),'note'));
       const menu=element('button','⋯','manage-button');
       menu.setAttribute('aria-label','Reemplazar o quitar '+exercise);
-      menu.onclick=()=>manageExercise(exercise,count);card.firstChild.append(menu);
+      menu.onclick=()=>manageExercise(ex);card.firstChild.append(menu);
       const columns=element('div',undefined,'columns');
       for(const label of ['Serie','Anterior','Kilos','Reps','RIR','✓']) columns.append(element('span',label));
       card.append(columns);session.append(card);
@@ -308,7 +350,12 @@ function renderSession(exercises){
       const add=element('button','+ Agregar serie');
       add.type='button';add.disabled=count>=100;
       add.onclick=localAction(()=>addChange('set',exercise,count));
-      card.append(add);
+      const less=element('button','− Quitar serie');
+      less.type='button';less.disabled=count<=1;
+      less.onclick=localAction(()=>{
+        if(confirm('¿Quitar la última serie de '+exercise+' desde la semana '+week+'? Las series registradas quedan en el historial.'))addChange('less',exercise,count);
+      });
+      const actions=element('div',undefined,'row set-actions');actions.append(less,add);card.append(actions);
     }
   }
 }
@@ -337,9 +384,9 @@ function render(){
   const prior=entries.find(e=>e.week===+f.week-1 && match(e));
   const stats=e=>(e.kg===null?'Sin carga registrada':e.kg+' kg')+' · '+e.reps+' reps · RIR '+e.rir;
   $('previous').textContent=prior?'Semana anterior · '+stats(prior):'';
-  const ex=plan?.weeks[+f.week-1]?.[+f.day-1]?.find(x=>x[0]===f.exercise);
+  const ex=dayExercises(backup(),+f.week,+f.day).find(x=>normalizeName(x[0])===normalizeName(f.exercise));
 
-  $('target').textContent=ex?ex[1]+' series · '+ex[2]+' reps\nRIR objetivo '+ex[4]+' · Descanso '+ex[5]+(ex[3]?'\n'+ex[3]:''):'';
+  $('target').textContent=ex?exerciseNote(ex):'';
   const rows=entries.filter(e=>e.week===+f.week && e.day===+f.day && e.date===f.date);
   const expanded=new Set(Array.from($('history').querySelectorAll('details[open]'),g=>g.dataset.key));
   const groups=new Map();
@@ -437,13 +484,14 @@ function disconnect(message){
 $('off').onclick=()=>disconnect('Desconectado. Tus series siguen en este dispositivo.');
 const gis=document.createElement('script');
 gis.src='https://accounts.google.com/gsi/client';gis.async=true;document.head.append(gis);
-$('connect').onclick=localAction(()=>{
+function connectDrive(automatic=false){
+  if($('connect').disabled)return;
   const id=$('client').value.trim();
   ensure(/^[\w-]+\.apps\.googleusercontent\.com$/.test(id),'Pegá el Client ID web completo.');
   ensure(window.google?.accounts?.oauth2,'Google todavía no cargó. Revisá la conexión y recargá la página.');
   localStorage.setItem(ns+'client',id);
   const oauth=google.accounts.oauth2.initTokenClient({client_id:id,scope,include_granted_scopes:false,
-    error_callback:()=>disconnect('Se cerró la ventana de Google. Podés volver a conectar.'),
+    error_callback:()=>disconnect('Para conectar con Google, tocá las flechas de Drive de arriba.'),
     callback:r=>{
       if(!r.access_token || !google.accounts.oauth2.hasGrantedAllScopes(r,scope))return disconnect('Google no autorizó el acceso a la copia.');
       token=r.access_token;expires=Date.now()+Number(r.expires_in)*1000-15000;
@@ -451,8 +499,9 @@ $('connect').onclick=localAction(()=>{
       sync();
     }});
   $('connect').disabled=true;
-  try{oauth.requestAccessToken({prompt:'select_account'});}catch(err){disconnect('Volvé a conectar Drive.');throw err;}
-});
+  try{oauth.requestAccessToken({prompt:automatic?'':'select_account'});}catch(err){disconnect('Para conectar con Google, tocá las flechas de Drive de arriba.');throw err;}
+}
+$('connect').onclick=localAction(()=>connectDrive());
 function schedule(){
   if(!token)return;
   say('Cambios locales pendientes de sincronización.');clearTimeout(timer);timer=setTimeout(sync,800);
@@ -563,7 +612,7 @@ function initStopwatch(){
     $('clock-reset').disabled=state.started===null && !state.elapsed;
     $('finish-workout').disabled=$('clock-reset').disabled;
   }
-  $('clock-toggle').onclick=localAction(()=>{
+  function toggleClock(){
     state=read();
     const now=Date.now();
     ensure(state.id || $('date').value,'Elegí la fecha del entrenamiento.');
@@ -571,7 +620,31 @@ function initStopwatch(){
     const next=state.started===null?{...context,started:now}:{...context,elapsed:elapsed(now),started:null};
     localStorage.setItem(key,JSON.stringify(next));
     refresh();
-  });
+  }
+  $('clock-toggle').onclick=localAction(toggleClock);
+  let driveAttempt=null;
+  $('off').addEventListener('click',()=>{driveAttempt=read().id||driveAttempt;});
+  function firstSet(){
+    state=read();
+    if(!state.id && state.started===null && !state.elapsed)toggleClock();
+    const session=state.id || 'sesion-anterior';
+    if(session===driveAttempt)return;
+    driveAttempt=session;
+    if(token && Date.now()<expires){sync();return;}
+    if(token)disconnect('Reconectando con Google Drive…');
+    if(!$('client').value.trim() || !navigator.onLine || !window.google?.accounts?.oauth2){
+      say('Guardado local. Para conectar, tocá las flechas de Drive de arriba cuando tengas conexión.');
+      return;
+    }
+    connectDrive(true);
+  }
+  document.addEventListener('input',localAction(event=>{
+    const input=event.target;
+    if(input.value && input.matches('.setrow input:not(:disabled), #entry #kg, #entry #reps, #entry #rir'))firstSet();
+  }));
+  document.addEventListener('submit',localAction(event=>{
+    if(event.target.matches('.setrow, #entry'))firstSet();
+  }),true);
   $('clock-reset').onclick=localAction(()=>{
     if(!window.confirm('¿Volver el cronómetro a cero?'))return;
     localStorage.removeItem(key);
